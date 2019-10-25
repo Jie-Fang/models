@@ -228,9 +228,14 @@ def process_image(sample, settings, mode, color_jitter, rotate):
         img = policy(img)
         img = np.asarray(img)
 
-    img = img.astype('float32').transpose((2, 0, 1)) / 255
-    img_mean = np.array(mean).reshape((3, 1, 1))
-    img_std = np.array(std).reshape((3, 1, 1))
+    if settings.data_format == 'NCHW':
+        img = img.astype('float32').transpose((2, 0, 1)) / 255
+        img_mean = np.array(mean).reshape((3, 1, 1))
+        img_std = np.array(std).reshape((3, 1, 1))
+    else:
+        img = img.astype('float32') / 255
+        img_mean = np.array(mean).reshape((1, 1, 3))
+        img_std = np.array(std).reshape((1, 1, 3))
     img -= img_mean
     img /= img_std
 

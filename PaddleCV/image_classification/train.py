@@ -74,7 +74,8 @@ def build_program(is_train, main_prog, startup_prog, args):
             if is_train:
                 optimizer = create_optimizer(args)
                 avg_cost = loss_out[0]
-                optimizer.minimize(avg_cost)
+                mp_optimizer = fluid.contrib.mixed_precision.decorate(optimizer, init_loss_scaling=128)
+                mp_optimizer.minimize(avg_cost)
                 #XXX: fetch learning rate now, better implement is required here. 
                 global_lr = optimizer._global_learning_rate()
                 global_lr.persistable = True
@@ -170,11 +171,43 @@ def train(args):
     init_model(exe, args, train_prog)
     num_trainers = int(os.environ.get('PADDLE_TRAINERS_NUM', 1))
     imagenet_reader = reader.ImageNetReader(0 if num_trainers > 1 else None)
-    train_reader = imagenet_reader.train(settings=args)
-    test_reader = imagenet_reader.val(settings=args)
 
-    train_py_reader.decorate_sample_list_generator(train_reader, place)
-    test_py_reader.decorate_sample_list_generator(test_reader, place)
+    def reader_creator_random_image_and_label(args):
+        image_shape = args.image_shape.split(',')
+        if args.data_format == 'NCHW':
+            channel = int(image_shape[0])
+            height = int(image_shape[1])
+            width = int(image_shape[2])
+            size = [channel, height, width]
+        else:
+            channel = int(image_shape[2])
+            height = int(image_shape[0])
+            width = int(image_shape[1])
+            size = [height, width, channel]
+        def reader():
+            batch_data = []
+            for i in range(200):
+                fake_image = np.random.uniform(low=0,
+                                            high=1,
+                                            size=size).astype('float32')
+                fake_label = np.ones([1], dtype='int64')
+                batch_data.append([fake_image, fake_label])
+                if len(batch_data) == args.batch_size:
+                    image_batch = np.stack([d[0] for d in batch_data])
+                    label_batch = np.stack([d[1] for d in batch_data])
+                    yield (image_batch, label_batch)
+        return reader
+
+    if args.use_sync_data:
+        train_reader = reader_creator_random_image_and_label(args)
+        test_reader = reader_creator_random_image_and_label(args)
+        train_py_reader.decorate_sample_list_generator(train_reader, place)
+        test_py_reader.decorate_sample_list_generator(test_reader, place)
+    else:
+        train_reader = imagenet_reader.train(settings=args)
+        test_reader = imagenet_reader.val(settings=args)
+        train_py_reader.decorate_sample_list_generator(train_reader, place)
+        test_py_reader.decorate_sample_list_generator(test_reader, place)
 
     compiled_train_prog = best_strategy_compiled(args, train_prog,
                                                  train_fetch_vars[0], exe)
@@ -186,12 +219,12 @@ def train(args):
         train_batch_time_record = []
         train_batch_metrics_record = []
 
-        train_py_reader.start()
-
-        try:
-            while True:
+        if args.use_sync_data:
+            train_batch_id = pass_id
+            for data in train_reader():
                 t1 = time.time()
                 train_batch_metrics = exe.run(compiled_train_prog,
+                                              feed={'feed_image': data[0], 'feed_label': data[1]},
                                               fetch_list=train_fetch_list)
                 t2 = time.time()
                 train_batch_elapse = t2 - t1
@@ -203,22 +236,40 @@ def train(args):
                     print_info(pass_id, train_batch_id, args.print_step,
                                train_batch_metrics_avg, train_batch_elapse, "batch")
                     sys.stdout.flush()
-                train_batch_id += 1
+        else:
+            train_py_reader.start()
 
-        except fluid.core.EOFException:
-            train_py_reader.reset()
+            try:
+                while True:
+                    t1 = time.time()
+                    train_batch_metrics = exe.run(compiled_train_prog,
+                                                fetch_list=train_fetch_list)
+                    t2 = time.time()
+                    train_batch_elapse = t2 - t1
+                    train_batch_time_record.append(train_batch_elapse)
+                    train_batch_metrics_avg = np.mean(
+                        np.array(train_batch_metrics), axis=1)
+                    train_batch_metrics_record.append(train_batch_metrics_avg)
+                    if trainer_id == 0:
+                        print_info(pass_id, train_batch_id, args.print_step,
+                                train_batch_metrics_avg, train_batch_elapse, "batch")
+                        sys.stdout.flush()
+                    train_batch_id += 1
 
-        if trainer_id == 0:
-            if args.use_ema:
-                print('ExponentialMovingAverage validate start...')
-                with ema.apply(exe):
-                    validate(args, test_py_reader, exe, test_prog, test_fetch_list, pass_id, train_batch_metrics_record)
-                print('ExponentialMovingAverage validate over!')
+            except fluid.core.EOFException:
+                train_py_reader.reset()
 
-            validate(args, test_py_reader, exe, test_prog, test_fetch_list, pass_id, train_batch_metrics_record)
-            #For now, save model per epoch.
-            if pass_id % args.save_step == 0:
-                save_model(args, exe, train_prog, pass_id)
+            if trainer_id == 0:
+                if args.use_ema:
+                    print('ExponentialMovingAverage validate start...')
+                    with ema.apply(exe):
+                        validate(args, test_py_reader, exe, test_prog, test_fetch_list, pass_id, train_batch_metrics_record)
+                    print('ExponentialMovingAverage validate over!')
+
+                validate(args, test_py_reader, exe, test_prog, test_fetch_list, pass_id, train_batch_metrics_record)
+                #For now, save model per epoch.
+                if pass_id % args.save_step == 0:
+                    save_model(args, exe, train_prog, pass_id)
 
 
 def main():

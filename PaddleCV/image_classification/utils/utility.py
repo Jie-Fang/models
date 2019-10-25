@@ -93,6 +93,7 @@ def parse_args():
     add_arg('checkpoint',               str,    None,                   "Whether to resume checkpoint.")
     add_arg('print_step',               int,    10,                     "The steps interval to print logs")
     add_arg('save_step',                int,    1,                      "The steps interval to save checkpoints")
+    add_arg('use_sync_data',            bool,   False,                  "Whether to use sync data")
 
     # SOLVER AND HYPERPARAMETERS
     add_arg('model',                    str,    "ResNet50",   "The name of network.")
@@ -110,6 +111,7 @@ def parse_args():
     add_arg('decay_epochs',             float,  2.4,                    "Decay epochs of exponential decay learning rate scheduler")
     add_arg('decay_rate',               float,  0.97,                   "Decay rate of exponential decay learning rate scheduler")
     add_arg('drop_connect_rate',        float,  0.2,                    "The value of drop connect rate")
+    add_arg('data_format',              str,    "NCHW",                 "The data format of tensor")
     parser.add_argument('--step_epochs', nargs='+', type=int, default=[30, 60, 90], help="piecewise decay step")
 
     # READER AND PREPROCESS
@@ -292,24 +294,32 @@ def create_pyreader(is_train, args):
     feed_y_a = fluid.layers.data(
         name="feed_y_a", shape=[1], dtype="int64", lod_level=0)
 
+    iterable = False
     if is_train and args.use_mixup:
         feed_y_b = fluid.layers.data(
             name="feed_y_b", shape=[1], dtype="int64", lod_level=0)
         feed_lam = fluid.layers.data(
             name="feed_lam", shape=[1], dtype="float32", lod_level=0)
 
+        if args.use_sync_data:
+            iterable = True
+        
         py_reader = fluid.io.PyReader(
             feed_list=[feed_image, feed_y_a, feed_y_b, feed_lam],
             capacity=64,
             use_double_buffer=True,
-            iterable=False)
+            iterable=iterable)
         return py_reader, [feed_image, feed_y_a, feed_y_b, feed_lam]
     else:
+        
+        if args.use_sync_data:
+            iterable = True
+
         py_reader = fluid.io.PyReader(
             feed_list=[feed_image, feed_label],
             capacity=64,
             use_double_buffer=True,
-            iterable=False)
+            iterable=iterable)
 
         return py_reader, [feed_image, feed_label]
 

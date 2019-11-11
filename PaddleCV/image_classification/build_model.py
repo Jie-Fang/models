@@ -62,7 +62,7 @@ def _googlenet_model(data, model, args, is_train):
     image = data[0]
     label = data[1]
 
-    out0, out1, out2 = model.net(input=image, class_dim=args.class_dim)
+    out0, out1, out2 = model.net(input=image, args=args, class_dim=args.class_dim)
     cost0 = fluid.layers.cross_entropy(input=out0, label=label)
     cost1 = fluid.layers.cross_entropy(input=out1, label=label)
     cost2 = fluid.layers.cross_entropy(input=out2, label=label)

@@ -35,8 +35,12 @@ class GoogLeNet():
                    stride=1,
                    groups=1,
                    act=None,
-                   name=None):
-        channels = input.shape[1]
+                   name=None,
+                   data_format='NCHW'):
+        if data_format == 'NCHW':
+            channels = input.shape[1]
+        else:
+            channels = input.shape[-1]
         stdv = (3.0 / (filter_size**2 * channels))**0.5
         param_attr = ParamAttr(
             initializer=fluid.initializer.Uniform(-stdv, stdv),
@@ -51,7 +55,8 @@ class GoogLeNet():
             act=act,
             param_attr=param_attr,
             bias_attr=False,
-            name=name)
+            name=name,
+            data_format=data_format)
         return conv
 
     def xavier(self, channels, filter_size, name):
@@ -71,48 +76,55 @@ class GoogLeNet():
                   filter5R,
                   filter5,
                   proj,
-                  name=None):
+                  name=None,
+                  data_format='NCHW'):
         conv1 = self.conv_layer(
             input=input,
             num_filters=filter1,
             filter_size=1,
             stride=1,
             act=None,
-            name="inception_" + name + "_1x1")
+            name="inception_" + name + "_1x1",
+            data_format=data_format)
         conv3r = self.conv_layer(
             input=input,
             num_filters=filter3R,
             filter_size=1,
             stride=1,
             act=None,
-            name="inception_" + name + "_3x3_reduce")
+            name="inception_" + name + "_3x3_reduce",
+            data_format=data_format)
         conv3 = self.conv_layer(
             input=conv3r,
             num_filters=filter3,
             filter_size=3,
             stride=1,
             act=None,
-            name="inception_" + name + "_3x3")
+            name="inception_" + name + "_3x3",
+            data_format=data_format)
         conv5r = self.conv_layer(
             input=input,
             num_filters=filter5R,
             filter_size=1,
             stride=1,
             act=None,
-            name="inception_" + name + "_5x5_reduce")
+            name="inception_" + name + "_5x5_reduce",
+            data_format=data_format)
         conv5 = self.conv_layer(
             input=conv5r,
             num_filters=filter5,
             filter_size=5,
             stride=1,
             act=None,
-            name="inception_" + name + "_5x5")
+            name="inception_" + name + "_5x5",
+            data_format=data_format)
         pool = fluid.layers.pool2d(
             input=input,
             pool_size=3,
             pool_stride=1,
             pool_padding=1,
-            pool_type='max')
+            pool_type='max',
+            data_format=data_format)
         convprj = fluid.layers.conv2d(
             input=pool,
             filter_size=1,
@@ -122,21 +134,23 @@ class GoogLeNet():
             name="inception_" + name + "_3x3_proj",
             param_attr=ParamAttr(
                 name="inception_" + name + "_3x3_proj_weights"),
-            bias_attr=False)
+            bias_attr=False,
+            data_format=data_format)
         cat = fluid.layers.concat(input=[conv1, conv3, conv5, convprj], axis=1)
         cat = fluid.layers.relu(cat)
         return cat
 
-    def net(self, input, class_dim=1000):
+    def net(self, input, args, class_dim=1000):
         conv = self.conv_layer(
             input=input,
             num_filters=64,
             filter_size=7,
             stride=2,
             act=None,
-            name="conv1")
+            name="conv1",
+            data_format=args.data_format)
         pool = fluid.layers.pool2d(
-            input=conv, pool_size=3, pool_type='max', pool_stride=2)
+            input=conv, pool_size=3, pool_type='max', pool_stride=2, data_format=args.data_format)
 
         conv = self.conv_layer(
             input=pool,
@@ -144,41 +158,43 @@ class GoogLeNet():
             filter_size=1,
             stride=1,
             act=None,
-            name="conv2_1x1")
+            name="conv2_1x1",
+            data_format=args.data_format)
         conv = self.conv_layer(
             input=conv,
             num_filters=192,
             filter_size=3,
             stride=1,
             act=None,
-            name="conv2_3x3")
+            name="conv2_3x3",
+            data_format=args.data_format)
         pool = fluid.layers.pool2d(
-            input=conv, pool_size=3, pool_type='max', pool_stride=2)
+            input=conv, pool_size=3, pool_type='max', pool_stride=2, data_format=args.data_format)
 
-        ince3a = self.inception(pool, 192, 64, 96, 128, 16, 32, 32, "ince3a")
+        ince3a = self.inception(pool, 192, 64, 96, 128, 16, 32, 32, "ince3a", data_format=args.data_format)
         ince3b = self.inception(ince3a, 256, 128, 128, 192, 32, 96, 64,
-                                "ince3b")
+                                "ince3b", data_format=args.data_format)
         pool3 = fluid.layers.pool2d(
-            input=ince3b, pool_size=3, pool_type='max', pool_stride=2)
+            input=ince3b, pool_size=3, pool_type='max', pool_stride=2, data_format=args.data_format)
 
-        ince4a = self.inception(pool3, 480, 192, 96, 208, 16, 48, 64, "ince4a")
+        ince4a = self.inception(pool3, 480, 192, 96, 208, 16, 48, 64, "ince4a", data_format=args.data_format)
         ince4b = self.inception(ince4a, 512, 160, 112, 224, 24, 64, 64,
-                                "ince4b")
+                                "ince4b", data_format=args.data_format)
         ince4c = self.inception(ince4b, 512, 128, 128, 256, 24, 64, 64,
-                                "ince4c")
+                                "ince4c", data_format=args.data_format)
         ince4d = self.inception(ince4c, 512, 112, 144, 288, 32, 64, 64,
-                                "ince4d")
+                                "ince4d", data_format=args.data_format)
         ince4e = self.inception(ince4d, 528, 256, 160, 320, 32, 128, 128,
-                                "ince4e")
+                                "ince4e", data_format=args.data_format)
         pool4 = fluid.layers.pool2d(
-            input=ince4e, pool_size=3, pool_type='max', pool_stride=2)
+            input=ince4e, pool_size=3, pool_type='max', pool_stride=2, data_format=args.data_format)
 
         ince5a = self.inception(pool4, 832, 256, 160, 320, 32, 128, 128,
-                                "ince5a")
+                                "ince5a", data_format=args.data_format)
         ince5b = self.inception(ince5a, 832, 384, 192, 384, 48, 128, 128,
-                                "ince5b")
+                                "ince5b", data_format=args.data_format)
         pool5 = fluid.layers.pool2d(
-            input=ince5b, pool_size=7, pool_type='avg', pool_stride=7)
+            input=ince5b, pool_size=7, pool_type='avg', pool_stride=7, data_format=args.data_format)
         dropout = fluid.layers.dropout(x=pool5, dropout_prob=0.4)
         out = fluid.layers.fc(input=dropout,
                               size=class_dim,
@@ -188,14 +204,15 @@ class GoogLeNet():
                               bias_attr=ParamAttr(name="out_offset"))
 
         pool_o1 = fluid.layers.pool2d(
-            input=ince4a, pool_size=5, pool_type='avg', pool_stride=3)
+            input=ince4a, pool_size=5, pool_type='avg', pool_stride=3, data_format=args.data_format)
         conv_o1 = self.conv_layer(
             input=pool_o1,
             num_filters=128,
             filter_size=1,
             stride=1,
             act=None,
-            name="conv_o1")
+            name="conv_o1",
+            data_format=args.data_format)
         fc_o1 = fluid.layers.fc(input=conv_o1,
                                 size=1024,
                                 act='relu',
@@ -211,14 +228,15 @@ class GoogLeNet():
                                bias_attr=ParamAttr(name="out1_offset"))
 
         pool_o2 = fluid.layers.pool2d(
-            input=ince4d, pool_size=5, pool_type='avg', pool_stride=3)
+            input=ince4d, pool_size=5, pool_type='avg', pool_stride=3, data_format=args.data_format)
         conv_o2 = self.conv_layer(
             input=pool_o2,
             num_filters=128,
             filter_size=1,
             stride=1,
             act=None,
-            name="conv_o2")
+            name="conv_o2",
+            data_format=args.data_format)
         fc_o2 = fluid.layers.fc(input=conv_o2,
                                 size=1024,
                                 act='relu',

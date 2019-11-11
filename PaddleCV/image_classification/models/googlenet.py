@@ -136,7 +136,10 @@ class GoogLeNet():
                 name="inception_" + name + "_3x3_proj_weights"),
             bias_attr=False,
             data_format=data_format)
-        cat = fluid.layers.concat(input=[conv1, conv3, conv5, convprj], axis=1)
+        if data_format == 'NCHW':
+            cat = fluid.layers.concat(input=[conv1, conv3, conv5, convprj], axis=1)
+        else:
+            cat = fluid.layers.concat(input=[conv1, conv3, conv5, convprj], axis=3)
         cat = fluid.layers.relu(cat)
         return cat
 
